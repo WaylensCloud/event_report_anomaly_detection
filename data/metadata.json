@@ -1,0 +1,327 @@
+{
+  "event_types": [
+    "AGMT_Mic",
+    "AGMT_MicPiezo",
+    "AGMT_Piezo",
+    "ASLEEP",
+    "CYCLIST_COLLISION",
+    "Collision_Heavy",
+    "Collision_Light",
+    "Collision_Medium",
+    "DAYDREAMING",
+    "DISTRACTED",
+    "DRINKING",
+    "DRIVING_HEAVY_HIT",
+    "DRIVING_HIT",
+    "DRIVING_LIGHT_HIT",
+    "DRIVING_SUSPICIOUS_HIT",
+    "DROWSINESS",
+    "FENCE_ENTER",
+    "FENCE_EXIT",
+    "FORWARD_COLLISION_WARNING",
+    "HARD_ACCEL",
+    "HARD_BRAKE",
+    "HARSH_ACCEL",
+    "HARSH_BRAKE",
+    "HARSH_TURN",
+    "HEADWAY_MONITORING_EMERGENCY",
+    "HEADWAY_MONITORING_WARNING",
+    "IDLE_NO_DRIVER",
+    "LANE_DEPARTURE_WARNING",
+    "MANUAL",
+    "NO_DRIVER",
+    "NO_SEATBELT",
+    "OVER_MAX_SPEED",
+    "PARKING_HEAVY_HIT",
+    "PARKING_HIT",
+    "PARKING_MOTION",
+    "PASSENGERS_INSIDE",
+    "PASSENGERS_NO_SEATBELT",
+    "PEDESTRIAN_COLLISION",
+    "PEDESTRIAN_WARNING",
+    "POTENTIAL_INCIDENT_HIGH",
+    "POTENTIAL_INCIDENT_LOW",
+    "POTENTIAL_INCIDENT_MEDIUM",
+    "POWER_LOST",
+    "PULLOVER_HIGHWAY",
+    "RISKY_DISTRACTED",
+    "RISKY_SPEEDING",
+    "RISKY_USING_PHONE",
+    "SEVERE_ACCEL",
+    "SEVERE_BRAKE",
+    "SEVERE_TURN",
+    "SHARP_TURN",
+    "SMOKING",
+    "SPEEDING",
+    "STOP_SIGN_VIOLATION",
+    "USING_PHONE",
+    "VULNERABLE_ROAD_USER_WARNING",
+    "YAWN",
+    "unknown_event"
+  ],
+  "fleets": [
+    {
+      "fleetid": "0a10673778434efda69560020ad85d68",
+      "fleetname": "AGMT"
+    },
+    {
+      "fleetid": "0ab6f47af296424c80d63837f22708aa",
+      "fleetname": null
+    },
+    {
+      "fleetid": "0ab6f47af296424c80d63837f22708aa",
+      "fleetname": "Insurevision"
+    },
+    {
+      "fleetid": "0f7e33824cfa498bb559785b2866c71c",
+      "fleetname": null
+    },
+    {
+      "fleetid": "10b7d6c47a664b0dba46d0418a4c7c9d",
+      "fleetname": "Manifold"
+    },
+    {
+      "fleetid": "137605d3d9994bab86225422f3b7c964",
+      "fleetname": "BudgetGPS"
+    },
+    {
+      "fleetid": "1541135a12a34ab5b7e2879123c50459",
+      "fleetname": null
+    },
+    {
+      "fleetid": "1541135a12a34ab5b7e2879123c50459",
+      "fleetname": "Moter"
+    },
+    {
+      "fleetid": "1bfd5a0ef27848fc860498367d03f359",
+      "fleetname": "AddOnSystems"
+    },
+    {
+      "fleetid": "21ae397adc3f4dc28247b21cb85f35ec",
+      "fleetname": "AW-GPS11"
+    },
+    {
+      "fleetid": "21ae397adc3f4dc28247b21cb85f35ec",
+      "fleetname": null
+    },
+    {
+      "fleetid": "21ae397adc3f4dc28247b21cb85f35ec",
+      "fleetname": "AW-GPS03"
+    },
+    {
+      "fleetid": "2410311593904d3fbd364634b75f71d6",
+      "fleetname": "Orion"
+    },
+    {
+      "fleetid": "2410311593904d3fbd364634b75f71d6",
+      "fleetname": null
+    },
+    {
+      "fleetid": "268515b6e04e48e5838a3fcfed63d65c",
+      "fleetname": "DriveSafeInitiative"
+    },
+    {
+      "fleetid": "268515b6e04e48e5838a3fcfed63d65c",
+      "fleetname": null
+    },
+    {
+      "fleetid": "268515b6e04e48e5838a3fcfed63d65c",
+      "fleetname": "AGMT"
+    },
+    {
+      "fleetid": "268515b6e04e48e5838a3fcfed63d65c",
+      "fleetname": "waylens"
+    },
+    {
+      "fleetid": "2fac17c122a54089a622a687e3cb20aa",
+      "fleetname": "Konexial"
+    },
+    {
+      "fleetid": "32b8081c10f44a48a6252125501d4fc0",
+      "fleetname": "GorillaSafety"
+    },
+    {
+      "fleetid": "34a4487abad94f0dbeee4e85fabe4eb8",
+      "fleetname": "CanAm"
+    },
+    {
+      "fleetid": "34ac6f3a6ea0422399bbd8ce274b541d",
+      "fleetname": "AssetWorksDEV"
+    },
+    {
+      "fleetid": "34ac6f3a6ea0422399bbd8ce274b541d",
+      "fleetname": "AW-SalesDemo"
+    },
+    {
+      "fleetid": "3719b9d0e6df44d9a161bdd6816f824e",
+      "fleetname": "StreetScope"
+    },
+    {
+      "fleetid": "45707ba724d04f2ab13dcfad1732f159",
+      "fleetname": "Intellishift"
+    },
+    {
+      "fleetid": "485f394300f84557adaa4174b451c71a",
+      "fleetname": "Prometheus"
+    },
+    {
+      "fleetid": "4f0137bc6d724ea69759a28b6ed3f6cc",
+      "fleetname": null
+    },
+    {
+      "fleetid": "5707e2a6aa114c55bae4c37f956a4a38",
+      "fleetname": "EZFleet"
+    },
+    {
+      "fleetid": "5707e2a6aa114c55bae4c37f956a4a38",
+      "fleetname": "EZFleet-Prod"
+    },
+    {
+      "fleetid": "5976b648b65a45758f4b1658b57aeb48",
+      "fleetname": "Rhino"
+    },
+    {
+      "fleetid": "5976b648b65a45758f4b1658b57aeb48",
+      "fleetname": null
+    },
+    {
+      "fleetid": "689f6925067c4e0a9784c7d277a07dea",
+      "fleetname": "AssetWorksDEV"
+    },
+    {
+      "fleetid": "7199139d72264745a28294e21974b6f3",
+      "fleetname": "AceTech"
+    },
+    {
+      "fleetid": "7199139d72264745a28294e21974b6f3",
+      "fleetname": null
+    },
+    {
+      "fleetid": "74b954cd0450451397cb44a206c78b19",
+      "fleetname": null
+    },
+    {
+      "fleetid": "7a8e9ea0b49b43a89ee1f18f3bc2705f",
+      "fleetname": null
+    },
+    {
+      "fleetid": "7d70c3c31700479c9bd4a300390865a5",
+      "fleetname": "Etrucks"
+    },
+    {
+      "fleetid": "8326fc1834134baa820e34b2f9b4dbbd",
+      "fleetname": "AW-FSSDemo"
+    },
+    {
+      "fleetid": "842e11b3335e41ccbb030a5738d03e75",
+      "fleetname": "DriveSafeInitiative"
+    },
+    {
+      "fleetid": "873d2b4568354774b2a0e19924a6dc24",
+      "fleetname": "ESG"
+    },
+    {
+      "fleetid": "877fae041704480f85bdf480fc35e2dc",
+      "fleetname": "AW-GPS08"
+    },
+    {
+      "fleetid": "8b9fe46eca7b4dcd91bd2a37118e8f43",
+      "fleetname": "Insurevision"
+    },
+    {
+      "fleetid": "92730f1c47bf4d64807386091f2028e1",
+      "fleetname": "Primax"
+    },
+    {
+      "fleetid": "a4b0330359614f90a13ae3daf894bdef",
+      "fleetname": "AW-GPS02"
+    },
+    {
+      "fleetid": "b179831213c445ebaafecae344cafa9c",
+      "fleetname": "AW-GPS11"
+    },
+    {
+      "fleetid": "bb759e2aa4db4dd3be9bf0ed8afdea54",
+      "fleetname": "GenesisCircle "
+    },
+    {
+      "fleetid": "bd6fdb434e27447689911c9faaf72ec6",
+      "fleetname": null
+    },
+    {
+      "fleetid": "bd6fdb434e27447689911c9faaf72ec6",
+      "fleetname": "AW-GPS01"
+    },
+    {
+      "fleetid": "be70bc1be7f2456daae951d59a1b48ce",
+      "fleetname": "Lifesaver"
+    },
+    {
+      "fleetid": "c0947c35919c40c5858bd69a2face56e",
+      "fleetname": "EZFleet-Prod"
+    },
+    {
+      "fleetid": "c26cce7ed90d4619beef44a9caf82bf5",
+      "fleetname": "AW-GPS06"
+    },
+    {
+      "fleetid": "c26cce7ed90d4619beef44a9caf82bf5",
+      "fleetname": null
+    },
+    {
+      "fleetid": "c6329dff7db740a2848b9d34ca6bd7af",
+      "fleetname": null
+    },
+    {
+      "fleetid": "c6329dff7db740a2848b9d34ca6bd7af",
+      "fleetname": "GroundCloud"
+    },
+    {
+      "fleetid": "c6a8d3add1b549d492db9aee616d5c64",
+      "fleetname": "AceTech"
+    },
+    {
+      "fleetid": "c6a8d3add1b549d492db9aee616d5c64",
+      "fleetname": "AceTechDEV"
+    },
+    {
+      "fleetid": "c6b395de6fd04932a530a4cfc3b2e0f0",
+      "fleetname": "Milliman "
+    },
+    {
+      "fleetid": "c82a67315b3246d884e4f26a56e54c88",
+      "fleetname": "CallPass"
+    },
+    {
+      "fleetid": "c82a67315b3246d884e4f26a56e54c88",
+      "fleetname": null
+    },
+    {
+      "fleetid": "ef03a5c83b394ac4bd5605a5a3452b1e",
+      "fleetname": "GPSInsight"
+    },
+    {
+      "fleetid": "ef03a5c83b394ac4bd5605a5a3452b1e",
+      "fleetname": null
+    },
+    {
+      "fleetid": "f67cd0a8927542d59937518da3a74be0",
+      "fleetname": "Tourmo"
+    },
+    {
+      "fleetid": "fe24bda12fce49049b89e45d0d31f734",
+      "fleetname": "TruckSpy"
+    }
+  ],
+  "date_range": {
+    "start": "2025-06-16",
+    "end": "2026-06-15",
+    "num_days": 365
+  },
+  "shape": [
+    63,
+    365,
+    58
+  ],
+  "generated_at": "20260616_110327"
+}

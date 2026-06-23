@@ -404,7 +404,7 @@ class FleetAnomalyDetectionTool(BaseTool):
         "模式支持：结构占比漂移崩塌 'distribution_shift'，总及单项数据突发激增 'volume_spike'。"
     )
     
-    env_path: str = "./env.json" 
+    env_path: str = "./config/env.json" 
     
     def get_db_connection(self):
         """加载环境配置获取数据库连接"""
@@ -545,7 +545,7 @@ class FleetAnomalyDetectionTool(BaseTool):
         self, fleet_id, start_date, end_date, detection_mode, enable_visualization,
         th_mult, min_abs_dev, min_dev, trend_win, hist_win
     ):
-        df = pd.read_csv('./output/all_fleets_timeseries.csv')
+        df = pd.read_csv('./data/all_fleets_timeseries.csv')
         df['event_date'] = pd.to_datetime(df['event_date'])
         df = df[df['fleetid'] == fleet_id]
         mask = (df['event_date'] >= pd.to_datetime(start_date)) & (df['event_date'] <= pd.to_datetime(end_date))

@@ -146,7 +146,7 @@ STRUCTURED_ANOMALY_RESULT_JSON:
 默认真实数据来自 PostgreSQL 视图 `v_clip_wide_api`，连接配置从：
 
 ```text
-./config/db_env.json
+./config/env.json
 ```
 
 读取。如果数据库配置缺失或连接失败，代码会进入 mock 测试分支，读取：

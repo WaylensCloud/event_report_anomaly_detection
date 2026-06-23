@@ -1,0 +1,19 @@
+{
+  "summary": {
+    "fleet_id": "c6329dff7db740a2848b9d34ca6bd7af",
+    "event_window": {
+      "start_date": "2026-03-25",
+      "end_date": "2026-06-23",
+      "judgement_date": "2026-06-22"
+    },
+    "detection_modes": [
+      "distribution_shift",
+      "volume_spike"
+    ],
+    "total_days": 90,
+    "has_anomaly": false,
+    "anomaly_count": 0,
+    "summary_file": "./agent_workspace/last_day_anomaly_summary_c6329dff7db740a2848b9d34ca6bd7af_202606230943.json"
+  },
+  "anomalies": []
+}
