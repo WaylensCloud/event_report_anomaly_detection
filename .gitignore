@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+agent_workspace/
+agent_workspace/*.json
+agent_workspace/*.csv
+agent_workspace/*.png
