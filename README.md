@@ -163,6 +163,6 @@ pip install -r requirements.txt
 
 ## 文件说明
 
-- `agent_vis.py`：核心异常检测工具。
+- `ad_tool.py`：核心异常检测工具。
 - `requirements.txt`：运行依赖。
 - `README.md`：使用说明和返回格式说明。
