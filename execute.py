@@ -44,7 +44,7 @@ def build_mode_args(end_date: str = None) -> List[Dict[str, Any]]:
         "fleet_id": fleet_id,
         "start_date": event_window["start_date"],
         "end_date": event_window["end_date"],
-        "enable_visualization": True,
+        "enable_visualization": False,
         # 趋势回看窗口：每次预测当前日时，只使用当前日之前的历史数据。
         "trend_window": 30,
         # 历史清洗窗口：用于清洗历史异常点，避免尖峰污染后续预测。
