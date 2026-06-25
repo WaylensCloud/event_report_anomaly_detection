@@ -2,6 +2,7 @@ numpy
 pandas
 matplotlib
 scipy
+scikit-learn
 pydantic
 langchain-core
 psycopg2-binary

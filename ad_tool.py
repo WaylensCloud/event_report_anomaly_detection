@@ -35,6 +35,16 @@ try:
 except ImportError:
     print("⚠️ scipy not found! Run: pip install scipy")
 
+try:
+    from sklearn.exceptions import ConvergenceWarning
+    from sklearn.linear_model import HuberRegressor
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+    print("⚠️ scikit-learn not found! Run: pip install scikit-learn")
+
 # 数据库连接依赖
 try:
     import psycopg2
@@ -43,6 +53,7 @@ except ImportError:
     HAS_PSYCOPG2 = False
 
 warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", category=ConvergenceWarning if HAS_SKLEARN else Warning)
 
 DEFAULT_TIME_WINDOW_DAYS = 90
 
@@ -92,53 +103,268 @@ class AnomalyDetectorEngine:
         return 0, 0.0
 
     @staticmethod
-    def _run_causal_predictive_anomaly(
-        series: pd.Series, trend_window: int, history_window: int, 
+    def _build_causal_clean_series(
+        series: pd.Series, trend_window: int, history_window: int,
         threshold_multiplier: float, min_deviation: float
+    ) -> pd.Series:
+        """
+        生成因果清洗序列：发现历史点明显偏离之前的主体规律时，用之前历史的鲁棒基线替换。
+        后续模型只学习这条 cleaned series，避免异常尖峰进入 lag/rolling 特征和训练目标。
+        """
+        y = pd.Series(series).astype(float).reset_index(drop=True)
+        clean_values = []
+        clean_residuals = []
+        deviation_direction = 0
+        deviation_streak = 0
+
+        for i, actual in enumerate(y):
+            if i == 0:
+                clean_values.append(float(actual))
+                clean_residuals.append(0.0)
+                continue
+
+            recent = pd.Series(clean_values[max(0, i - trend_window):i])
+            trend_baseline = float(recent.median()) if not recent.empty else float(y.iloc[:i].median())
+
+            seasonal_candidates = []
+            for lag in (7, 14, 21):
+                if i - lag >= 0:
+                    seasonal_candidates.append(clean_values[i - lag])
+            if seasonal_candidates:
+                seasonal_baseline = float(np.median(seasonal_candidates))
+                seasonal_mad = float(np.median(np.abs(np.array(seasonal_candidates) - seasonal_baseline)))
+                seasonal_is_stable = seasonal_mad <= max(min_deviation, seasonal_baseline * 0.35, 1.0)
+                if seasonal_is_stable:
+                    baseline = seasonal_baseline
+                else:
+                    baseline = 0.45 * trend_baseline + 0.55 * seasonal_baseline
+            else:
+                baseline = trend_baseline
+
+            residual_history = pd.Series(clean_residuals[max(0, i - history_window):i])
+            if len(residual_history) >= 5:
+                center = float(residual_history.median())
+                mad = float(np.median(np.abs(residual_history - center)))
+                robust_scale = max(mad * 1.4826, float(residual_history.std() or 0.0), 1.0)
+            else:
+                robust_scale = max(float(recent.std() or 0.0), 1.0)
+
+            actual = float(actual)
+            tolerance = max(min_deviation, baseline * 0.30, robust_scale * threshold_multiplier)
+            deviation = actual - baseline
+            is_deviation = abs(deviation) > tolerance
+            recurring_weekly_pattern = False
+            if seasonal_candidates:
+                seasonal_tolerance = max(min_deviation, seasonal_baseline * 0.40, seasonal_mad * 3.0, 1.0)
+                recurring_weekly_pattern = abs(actual - seasonal_baseline) <= seasonal_tolerance
+                if recurring_weekly_pattern:
+                    is_deviation = False
+
+            if is_deviation:
+                current_direction = 1 if deviation > 0 else -1
+                if current_direction == deviation_direction:
+                    deviation_streak += 1
+                else:
+                    deviation_direction = current_direction
+                    deviation_streak = 1
+            else:
+                deviation_direction = 0
+                deviation_streak = 0
+
+            # 短期尖峰/塌陷继续按异常处理；持续偏移达到 5 天后，才承认为新规律。
+            if is_deviation and deviation_streak < 5:
+                clean_value = baseline
+            else:
+                clean_value = actual
+
+            clean_values.append(max(clean_value, 0.0))
+            clean_residuals.append(clean_values[-1] - baseline)
+
+        return pd.Series(clean_values, index=series.index)
+
+    @staticmethod
+    def _causal_weekly_baseline(clean_series: pd.Series, trend_window: int) -> pd.Series:
+        """用 cleaned history 中的同星期历史生成鲁棒周周期基线。"""
+        y = pd.Series(clean_series).astype(float).reset_index(drop=True)
+        values = []
+        for i in range(len(y)):
+            seasonal = [y.iloc[i - lag] for lag in (7, 14, 21, 28) if i - lag >= 0]
+            recent = y.iloc[max(0, i - trend_window):i]
+
+            if seasonal:
+                seasonal_value = float(np.median(seasonal))
+                seasonal_mad = float(np.median(np.abs(np.array(seasonal) - seasonal_value)))
+                if not recent.empty:
+                    recent_value = float(recent.median())
+                    if seasonal_mad <= max(seasonal_value * 0.35, 1.0):
+                        value = seasonal_value
+                    else:
+                        value = 0.80 * seasonal_value + 0.20 * recent_value
+                else:
+                    value = seasonal_value
+            elif not recent.empty:
+                value = float(recent.median())
+            else:
+                value = float(y.median())
+            values.append(max(value, 0.0))
+        return pd.Series(values, index=clean_series.index)
+
+    @staticmethod
+    def _build_ml_features(series: pd.Series, dates: pd.Series = None) -> pd.DataFrame:
+        """构造严格因果特征：每一天的特征只使用当天之前的 cleaned history。"""
+        y = pd.Series(series).astype(float).reset_index(drop=True)
+        n = len(y)
+        t = np.arange(n, dtype=float)
+
+        if dates is not None:
+            day_of_week = pd.to_datetime(dates).reset_index(drop=True).dt.dayofweek.astype(float)
+        else:
+            day_of_week = pd.Series(t % 7)
+
+        features = pd.DataFrame({
+            't': t,
+            'dow_sin': np.sin(2 * np.pi * day_of_week / 7.0),
+            'dow_cos': np.cos(2 * np.pi * day_of_week / 7.0),
+            'lag_1': y.shift(1),
+            'lag_7': y.shift(7),
+            'lag_14': y.shift(14),
+            'lag_21': y.shift(21),
+            'rolling_median_7': y.shift(1).rolling(7, min_periods=1).median(),
+            'rolling_median_14': y.shift(1).rolling(14, min_periods=1).median(),
+            'rolling_median_21': y.shift(1).rolling(21, min_periods=1).median(),
+            'rolling_mean_7': y.shift(1).rolling(7, min_periods=1).mean(),
+            'same_weekday_median_4': pd.concat(
+                [y.shift(7), y.shift(14), y.shift(21), y.shift(28)], axis=1
+            ).median(axis=1),
+        })
+
+        causal_fill = y.shift(1).expanding(min_periods=1).median().bfill().fillna(y.median())
+        features = features.apply(lambda col: col.fillna(causal_fill))
+        return features.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    @staticmethod
+    def _historical_inlier_mask(
+        y_train: pd.Series, trend_window: int, threshold_multiplier: float, min_deviation: float
+    ) -> np.ndarray:
+        """
+        用滚动中位数 + MAD 先剔除历史中的明显异常点，避免模型学习异常。
+        返回 True 表示该历史点可参与训练。
+        """
+        if len(y_train) < 8:
+            return np.ones(len(y_train), dtype=bool)
+
+        baseline = y_train.shift(1).rolling(trend_window, min_periods=1).median()
+        baseline = baseline.bfill().fillna(y_train.median())
+        residual = y_train - baseline
+        med = residual.median()
+        mad = np.median(np.abs(residual - med))
+        robust_scale = max(mad * 1.4826, residual.std() if pd.notna(residual.std()) else 0.0, 1.0)
+        allowed = np.maximum(min_deviation, baseline * 0.30)
+        mask = (np.abs(residual - med) <= threshold_multiplier * robust_scale) | (np.abs(residual) <= allowed)
+
+        # 避免极端情况下过滤过多，保留大部分数据的规律作为训练主体。
+        if mask.sum() < max(8, int(len(y_train) * 0.55)):
+            return np.ones(len(y_train), dtype=bool)
+        return mask.to_numpy(dtype=bool)
+
+    @staticmethod
+    def _run_sklearn_predictive_anomaly(
+        series: pd.Series, trend_window: int, history_window: int,
+        threshold_multiplier: float, min_deviation: float, dates: pd.Series = None
     ) -> Tuple[pd.Series, pd.Series, pd.Series, pd.Series, pd.Series]:
         """
-        内部方法：复刻 predict_auto_period_v2.py 的因果预期与动态MAD逻辑
+        sklearn 鲁棒预测内核：
+        1. 每一天只用之前的历史训练，避免未来数据穿越。
+        2. 训练前用滚动中位数/MAD 剔除历史异常点。
+        3. 使用 HuberRegressor 拟合大多数数据的趋势、周周期、滞后和滚动特征。
         """
-        period, _ = AnomalyDetectorEngine.auto_detect_period(series)
-        # period = 7
-        # print(f"🔍 自动检测周期: {period} 天 (0 表示未检测到明显周期)")
-        causal_trend = series.shift(1).rolling(window=trend_window, min_periods=1).median()
-        causal_trend = causal_trend.bfill().fillna(series.median())
-        
-        historical_detrended = series - causal_trend
-        
-        if period > 0:
-            lags = [period * 1, period * 2, period * 3, period * 4]
-            lag_df = pd.DataFrame()
-            for lag in lags:
-                lag_df[f'lag_{lag}'] = historical_detrended.shift(lag)
-            causal_seasonality = lag_df.median(axis=1).fillna(0)
-        else:
-            causal_seasonality = pd.Series(0.0, index=series.index)
-            
-        expected_curve = (causal_trend + causal_seasonality).clip(lower=0)
-        
+        if not HAS_SKLEARN:
+            raise ImportError("volume_spike 检测需要 scikit-learn，请先安装: pip install scikit-learn")
+
+        original_index = series.index
+        raw_y = pd.Series(series).astype(float).reset_index(drop=True)
+        clean_y = AnomalyDetectorEngine._build_causal_clean_series(
+            raw_y, trend_window, history_window, threshold_multiplier, min_deviation
+        )
+        features = AnomalyDetectorEngine._build_ml_features(clean_y, dates)
+        weekly_baseline = AnomalyDetectorEngine._causal_weekly_baseline(clean_y, trend_window)
+        expected_values = []
+        trained_inlier_counts = []
+        min_train_points = 14
+
+        for i in range(len(raw_y)):
+            if i < min_train_points:
+                fallback = weekly_baseline.iloc[i] if i > 0 else clean_y.median()
+                expected_values.append(max(float(fallback), 0.0))
+                trained_inlier_counts.append(i)
+                continue
+
+            y_train = clean_y.iloc[:i]
+            x_train = features.iloc[:i]
+            x_pred = features.iloc[[i]]
+            inlier_mask = AnomalyDetectorEngine._historical_inlier_mask(
+                y_train, trend_window, threshold_multiplier, min_deviation
+            )
+
+            if inlier_mask.sum() < min_train_points:
+                fallback = y_train.tail(trend_window).median()
+                expected_values.append(max(float(fallback), 0.0))
+                trained_inlier_counts.append(int(inlier_mask.sum()))
+                continue
+
+            model = make_pipeline(
+                StandardScaler(),
+                HuberRegressor(epsilon=1.35, alpha=0.0001, max_iter=1000)
+            )
+            try:
+                model.fit(x_train.loc[inlier_mask], y_train.loc[inlier_mask])
+                pred = float(model.predict(x_pred)[0])
+            except Exception:
+                pred = float(y_train.loc[inlier_mask].tail(trend_window).median())
+
+            seasonal_pred = float(weekly_baseline.iloc[i])
+            if i >= 28:
+                pred = 0.45 * pred + 0.55 * seasonal_pred
+            elif i >= 14:
+                pred = 0.65 * pred + 0.35 * seasonal_pred
+
+            expected_values.append(max(pred, 0.0))
+            trained_inlier_counts.append(int(inlier_mask.sum()))
+
+        expected_curve = pd.Series(expected_values, index=original_index).clip(lower=0)
         deviation = series - expected_curve
         abs_deviation = np.abs(deviation)
-        
+        clean_residual = pd.Series(clean_y.values, index=original_index) - expected_curve
+
         def calc_mad(x):
             if len(x) == 0: return 0.0
             return np.median(np.abs(x - np.median(x)))
-            
-        rolling_mad = deviation.shift(1).rolling(window=history_window, min_periods=5).apply(calc_mad, raw=True)
-        rolling_std = deviation.shift(1).rolling(window=history_window, min_periods=5).std()
-        
+
+        rolling_mad = clean_residual.shift(1).rolling(window=history_window, min_periods=5).apply(calc_mad, raw=True)
+        rolling_std = clean_residual.shift(1).rolling(window=history_window, min_periods=5).std()
+
         scale = rolling_mad * 1.4826
         scale = np.where(scale < 1e-5, rolling_std, scale)
-        dynamic_scale = pd.Series(scale).bfill().fillna(1.0).clip(lower=1.0)
-        
+        dynamic_scale = pd.Series(scale, index=original_index).bfill().fillna(1.0).clip(lower=1.0)
+
         dynamic_min = np.maximum(min_deviation, expected_curve * 0.30)
-        
+
         anomaly_score = abs_deviation / dynamic_scale
-        is_anomaly = (anomaly_score > threshold_multiplier) & (abs_deviation > dynamic_min)
-        
-        upper_bound = expected_curve + np.maximum(dynamic_scale * threshold_multiplier, dynamic_min)
-        
+        raw_width = dynamic_scale * threshold_multiplier
+        width_cap = np.maximum(min_deviation * 3.0, expected_curve * 0.75)
+        threshold_width = np.maximum(dynamic_min, np.minimum(raw_width, width_cap))
+        anomaly_score = abs_deviation / (threshold_width / max(threshold_multiplier, 1e-6)).clip(lower=1.0)
+        is_anomaly = (abs_deviation > threshold_width)
+
+        upper_bound = expected_curve + threshold_width
+        lower_bound = (expected_curve - threshold_width).clip(lower=0)
+
+        # 保存下界和训练信息，供结构化输出与 CSV 调试使用。
+        expected_curve.attrs['model_name'] = 'sklearn_huber_regressor'
+        expected_curve.attrs['trained_inlier_counts'] = trained_inlier_counts
+        expected_curve.attrs['lower_bound'] = lower_bound
+        expected_curve.attrs['cleaned_series'] = pd.Series(clean_y.values, index=original_index)
+
         return is_anomaly, anomaly_score, expected_curve, dynamic_scale, upper_bound
 
     # ------------------- 模式 1: 单项及总量因果突增检测 -------------------
@@ -152,12 +378,15 @@ class AnomalyDetectorEngine:
         df['total'] = df[target_cols].sum(axis=1)
         
         # 1. 扫描大盘总量
-        tot_anom, tot_score, exp_tot, sc_tot, ub_tot = AnomalyDetectorEngine._run_causal_predictive_anomaly(
-            df['total'], trend_window, history_window, threshold_multiplier, min_deviation
+        tot_anom, tot_score, exp_tot, sc_tot, ub_tot = AnomalyDetectorEngine._run_sklearn_predictive_anomaly(
+            df['total'], trend_window, history_window, threshold_multiplier, min_deviation, df['event_date']
         )
         df['expected_total'] = exp_tot
+        df['total_lower_bound'] = exp_tot.attrs.get('lower_bound', pd.Series(0.0, index=df.index))
         df['total_upper_bound'] = ub_tot
         df['is_total_anomaly'] = tot_anom
+        df['total_ml_train_inliers'] = exp_tot.attrs.get('trained_inlier_counts', [0] * len(df))
+        df['total_cleaned_for_model'] = exp_tot.attrs.get('cleaned_series', df['total'])
         
         # 2. 扫描所有独立单项
         any_sub_anom = np.zeros(len(df), dtype=bool)
@@ -167,17 +396,20 @@ class AnomalyDetectorEngine:
         sub_results = {}
         for col in target_cols:
             if df[col].max() < 1: continue
-            sub_anom, sub_score, sub_exp, _, sub_ub = AnomalyDetectorEngine._run_causal_predictive_anomaly(
-                df[col], trend_window, history_window, threshold_multiplier, min_deviation
+            sub_anom, sub_score, sub_exp, _, sub_ub = AnomalyDetectorEngine._run_sklearn_predictive_anomaly(
+                df[col], trend_window, history_window, threshold_multiplier, min_deviation, df['event_date']
             )
             sub_results[col] = (sub_anom, sub_score, sub_exp)
             
             # 如果该单项在整个扫描周期内发生过异常，将其完整信息保存到 df 中供独立作图
             if sub_anom.any():
                 df[f'sub_exp_{col}'] = sub_exp
+                df[f'sub_lb_{col}'] = sub_exp.attrs.get('lower_bound', pd.Series(0.0, index=df.index))
                 df[f'sub_ub_{col}'] = sub_ub
                 df[f'sub_anom_{col}'] = sub_anom
                 df[f'sub_score_{col}'] = sub_score
+                df[f'sub_ml_train_inliers_{col}'] = sub_exp.attrs.get('trained_inlier_counts', [0] * len(df))
+                df[f'sub_cleaned_for_model_{col}'] = sub_exp.attrs.get('cleaned_series', df[col])
             
         # 3. 汇总报警理由
         for i in range(len(df)):
@@ -704,13 +936,17 @@ class FleetAnomalyDetectionTool(BaseTool):
                 if bool(last_row.get('is_total_anomaly', False)):
                     expected = last_row['expected_total']
                     upper = last_row['total_upper_bound']
-                    lower = max(0.0, expected - (upper - expected))
+                    lower = last_row.get('total_lower_bound', max(0.0, expected - (upper - expected)))
                     records.append(cls._build_anomaly_record(
                         fleet_id, start_date, end_date, last_event_date,
                         mode, "__total__", "event_count", last_row['total'],
                         expected, lower, upper, last_row['anomaly_score'],
                         str(last_row.get('anomaly_reason', '总量异常')),
-                        {"scope": "total_volume"}
+                        {
+                            "scope": "total_volume",
+                            "model": "sklearn_huber_regressor",
+                            "trained_inlier_count": cls._clean_number(last_row.get('total_ml_train_inliers', None))
+                        }
                     ))
 
                 for col in target_columns:
@@ -720,14 +956,18 @@ class FleetAnomalyDetectionTool(BaseTool):
 
                     expected = last_row[f'sub_exp_{col}']
                     upper = last_row[f'sub_ub_{col}']
-                    lower = max(0.0, expected - (upper - expected))
+                    lower = last_row.get(f'sub_lb_{col}', max(0.0, expected - (upper - expected)))
                     score_col = f'sub_score_{col}'
                     records.append(cls._build_anomaly_record(
                         fleet_id, start_date, end_date, last_event_date,
                         mode, col, "event_count", last_row[col],
                         expected, lower, upper, last_row.get(score_col, last_row['anomaly_score']),
                         f"{col} 计数异常",
-                        {"scope": "single_eventtype"}
+                        {
+                            "scope": "single_eventtype",
+                            "model": "sklearn_huber_regressor",
+                            "trained_inlier_count": cls._clean_number(last_row.get(f'sub_ml_train_inliers_{col}', None))
+                        }
                     ))
 
             elif mode == "distribution_shift":
@@ -817,10 +1057,10 @@ def test_agent_tool():
         "start_date": date_window_args["start_date"],
         "end_date": date_window_args["end_date"],
         "detection_mode": "all", 
-        "enable_visualization": False,
+        "enable_visualization": True,
         "threshold_multiplier": 7.5,
-        "trend_window": 21,
-        "history_window": 30         
+        "trend_window": 90,
+        "history_window": 90         
     }
     print("\n▶️ 测试：全模式事件窗口末日异常检测")
     print(anomaly_tool._run(**agent_args))
