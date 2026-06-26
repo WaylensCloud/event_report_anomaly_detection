@@ -111,9 +111,28 @@ def build_mode_args(end_date: str = None) -> List[Dict[str, Any]]:
             "threshold_multiplier": 8.0,
             # events_per_hour 量纲很小，所以最小绝对偏差也要小。
             "min_abs_deviation": 0.03,
-            "min_deviation": 0.25,
-            "trend_window": 30,
-            "history_window": 30,
+            "min_deviation": 0.25
+        },
+        {
+            **common_event_args,
+            "detection_mode": "cev_results",
+            "enable_visualization": True,
+            # cev_results 是比例指标，不做星期相位拆分时使用 1。
+            "spike_period": 1,
+            "stable_regime_points": 3,
+            "stable_regime_tolerance_ratio": 0.20,
+            "stable_shift_min_ratio": 0.45,
+            # 比例指标的相对容忍度。
+            "expected_relative_tolerance": 0.30,
+            "threshold_width_cap_ratio": 1.0,
+            "lower_anomaly_tolerance_multiplier": 1.0,
+            "normal_dispersion_multiplier": 1.5,
+            "normal_dispersion_floor_ratio": 0.20,
+            "normal_dispersion_min_points": 4,
+            "threshold_multiplier": 8.0,
+            # cev_results 是 0-1 比例，最小绝对偏差设为 0.05。
+            "min_abs_deviation": 0.05,
+            "min_deviation": 0.10,
         },
     ]
 
@@ -173,9 +192,10 @@ if __name__ == "__main__":
     # 也可以指定一个或多个模式：
     #   python execute.py volume_spike events_per_hour
     mode_list = sys.argv[1:] or [
-        "volume_spike",
+        # "volume_spike",
         # "distribution_shift",
-        "events_per_hour",
+        # "events_per_hour",
+        "cev_results",
     ]
 
     # 结束日期配置：

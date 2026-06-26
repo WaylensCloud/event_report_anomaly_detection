@@ -5,8 +5,10 @@ Data fetchers module.
 
 from .fleet_data import fetch_fleet_data
 from .events_per_hour import fetch_events_per_hour_data
+from .cev_results import fetch_cev_results_data
 
 __all__ = [
     'fetch_fleet_data',
     'fetch_events_per_hour_data',
+    'fetch_cev_results_data',
 ]

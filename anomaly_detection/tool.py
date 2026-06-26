@@ -21,7 +21,7 @@ except ImportError:
 # 导入内部模块
 # from .config.constants import DEFAULT_TIME_WINDOW_DAYS
 from .core.engine_clean import AnomalyDetectorEngine
-from .fetchers import fetch_fleet_data, fetch_events_per_hour_data
+from .fetchers import fetch_fleet_data, fetch_events_per_hour_data, fetch_cev_results_data
 
 warnings.filterwarnings("ignore")
 
@@ -34,13 +34,14 @@ class FleetAnomalyDetectionTool(BaseTool):
     - distribution_shift: 分布占比漂移崩塌
     - volume_spike: 总量和单项突增
     - events_per_hour: 每小时事件数异常
+    - cev_results: CEV结果比例异常
     - all: 运行所有模式
     """
     name: str = "fleet_behavior_anomaly_detector_periodic_regime_variance"
     description: str = (
         "扫描指定时间段的车队告警数据，提供每日维度的宏观异常检验并生成可视化图表。"
         "模式支持：结构占比漂移崩塌 'distribution_shift'，按当前趋势历史均值百分比范围判定的 'volume_spike'，"
-        "以及每小时事件数异常检测 'events_per_hour'。"
+        "每小时事件数异常检测 'events_per_hour'，以及 CEV 结果比例异常检测 'cev_results'。"
     )
 
     env_path: str = "./config/env.json"
@@ -295,6 +296,30 @@ class FleetAnomalyDetectionTool(BaseTool):
                     }
                 ))
 
+            elif mode == "cev_results":
+                # 查找所有可能的异常事件类型
+                anomalous_cols = [c.replace('sub_anom_', '') for c in last_row.index if c.startswith('sub_anom_') and bool(last_row[c])]
+                for col in anomalous_cols:
+                    expected = last_row[f'sub_exp_{col}']
+                    upper = last_row[f'sub_ub_{col}']
+                    lower = last_row.get(f'sub_lb_{col}', max(0.0, expected - (upper - expected)))
+                    score_col = f'sub_score_{col}'
+                    records.append(cls._build_anomaly_record(
+                        fleet_id, start_date, end_date, last_event_date,
+                        mode, col, "cev_ratio", last_row[col],
+                        expected, lower, upper, last_row.get(score_col, last_row['anomaly_score']),
+                        f"{col} CEV比例异常",
+                        {
+                            "scope": "cev_results",
+                            "model": "periodic_phase_regime_variance_robust",
+                            "spike_period": cls._clean_number(last_row.get('spike_period', None)),
+                            "phase": int((len(res_df) - 1) % int(last_row.get('spike_period', 7))) + 1,
+                            "trained_inlier_count": cls._clean_number(last_row.get(f'sub_ml_train_inliers_{col}', None)),
+                            "regime_shift_active": bool(last_row.get(f'sub_regime_shift_active_{col}', False)),
+                            "regime_level": cls._clean_number(last_row.get(f'sub_regime_level_{col}', None))
+                        }
+                    ))
+
         return records
 
     @staticmethod
@@ -310,8 +335,8 @@ class FleetAnomalyDetectionTool(BaseTool):
         """
         mode = (detection_mode or "all").strip().lower()
         if mode in {"all", "both", "全部", "所有"}:
-            return ["distribution_shift", "volume_spike", "events_per_hour"]
-        if mode in {"distribution_shift", "volume_spike", "events_per_hour"}:
+            return ["distribution_shift", "volume_spike", "events_per_hour", "cev_results"]
+        if mode in {"distribution_shift", "volume_spike", "events_per_hour", "cev_results"}:
             return [mode]
         return []
 
@@ -448,6 +473,67 @@ class FleetAnomalyDetectionTool(BaseTool):
             res_df.to_csv(csv_path, index=False)
         return res_df, csv_path, plot_path
 
+    @staticmethod
+    def _run_cev_results_mode(
+        df: pd.DataFrame, target_columns: List[str], fleet_id: str, timestamp: str, out_dir: str,
+        threshold_multiplier: float, min_abs_deviation: float, min_deviation: float,
+        trend_window: int, history_window: int, enable_visualization: bool,
+        spike_period: int = 7, stable_regime_points: int = 3,
+        stable_regime_tolerance_ratio: float = 0.10,
+        stable_shift_min_ratio: float = 0.45,
+        expected_relative_tolerance: float = 0.65,
+        threshold_width_cap_ratio: float = 1.80,
+        lower_anomaly_tolerance_multiplier: float = 1.80,
+        normal_dispersion_multiplier: float = 3.0,
+        normal_dispersion_floor_ratio: float = 0.25,
+        normal_dispersion_min_points: int = 4
+    ) -> Tuple[pd.DataFrame, Optional[str], str]:
+        """
+        运行 cev_results 检测模式
+
+        Args:
+            df: 数据框
+            target_columns: 目标列列表（事件类型）
+            fleet_id: 车队ID
+            timestamp: 时间戳
+            out_dir: 输出目录
+            threshold_multiplier: 阈值乘数
+            min_abs_deviation: 最小绝对偏差
+            min_deviation: 最小偏差
+            trend_window: 趋势窗口
+            history_window: 历史窗口
+            enable_visualization: 是否启用可视化
+            spike_period: 周期长度
+            stable_regime_points: 稳定区间点数
+            stable_regime_tolerance_ratio: 稳定区间容差
+            stable_shift_min_ratio: 稳定切换最小比例
+            expected_relative_tolerance: 预测值附近的最小相对容忍区间
+            threshold_width_cap_ratio: 阈值区间最大可扩到 expected 的比例
+            lower_anomaly_tolerance_multiplier: 低于预测值时额外放宽倍数
+            normal_dispersion_multiplier: 历史正常离散度放大倍数
+            normal_dispersion_floor_ratio: 历史离散度阈值相对下限
+            normal_dispersion_min_points: 启用历史离散度判断的最少已确认点数
+
+        Returns:
+            (结果数据框, CSV路径, 图表路径)
+        """
+        res_df = AnomalyDetectorEngine.run_cev_results_spike(
+            df, target_columns, threshold_multiplier, min_abs_deviation, trend_window, history_window,
+            spike_period, stable_regime_points, stable_regime_tolerance_ratio, stable_shift_min_ratio,
+            expected_relative_tolerance, threshold_width_cap_ratio,
+            lower_anomaly_tolerance_multiplier, normal_dispersion_multiplier,
+            normal_dispersion_floor_ratio, normal_dispersion_min_points
+        )
+        plot_path = f"{out_dir}/cev_results_curve_{fleet_id}_{timestamp}.png"
+        if enable_visualization:
+            AnomalyDetectorEngine.plot_cev_results_spike(res_df, fleet_id, plot_path, spike_period)
+
+        csv_path = None
+        if enable_visualization:
+            csv_path = f"{out_dir}/scan_data_cev_results_{fleet_id}_{timestamp}.csv"
+            res_df.to_csv(csv_path, index=False)
+        return res_df, csv_path, plot_path
+
     def _mock_run_for_testing(
         self, fleet_id, start_date, end_date, detection_mode, enable_visualization,
         th_mult, min_abs_dev, min_dev, trend_win, hist_win, spike_period=7,
@@ -487,7 +573,7 @@ class FleetAnomalyDetectionTool(BaseTool):
         """
         modes = self._resolve_detection_modes(detection_mode)
         if not modes:
-            return f"⚠️ 未知的检测模式: {detection_mode}。仅支持 'all'、'distribution_shift'、'volume_spike'、'events_per_hour'。"
+            return f"⚠️ 未知的检测模式: {detection_mode}。仅支持 'all'、'distribution_shift'、'volume_spike'、'events_per_hour'、'cev_results'。"
 
         out_dir = './agent_workspace'
         os.makedirs(out_dir, exist_ok=True)
@@ -629,7 +715,7 @@ class FleetAnomalyDetectionTool(BaseTool):
         try:
             modes = self._resolve_detection_modes(detection_mode)
             if not modes:
-                return f"⚠️ 未知的检测模式: {detection_mode}。仅支持 'all'、'distribution_shift'、'volume_spike'、'events_per_hour'。"
+                return f"⚠️ 未知的检测模式: {detection_mode}。仅支持 'all'、'distribution_shift'、'volume_spike'、'events_per_hour'、'cev_results'。"
 
             out_dir = './agent_workspace'
             os.makedirs(out_dir, exist_ok=True)
@@ -681,6 +767,29 @@ class FleetAnomalyDetectionTool(BaseTool):
                     import traceback
                     traceback.print_exc()
                     print(f"⚠️ 获取 events_per_hour 数据失败: {e}")
+
+            # 处理 cev_results 模式
+            if 'cev_results' in modes:
+                try:
+                    df_cev = fetch_cev_results_data(fleet_id, start_date, end_date)
+                    if not df_cev.empty:
+                        # 提取事件类型列（排除 fleetid 和 event_date）
+                        cev_target_columns = [col for col in df_cev.columns if col not in ['fleetid', 'event_date']]
+                        print(f"[DEBUG] tool.py _run: 从 fetch_cev_results_data 获取到 {len(cev_target_columns)} 个事件类型: {cev_target_columns}")
+                        res_df, csv_path, plot_path = self._run_cev_results_mode(
+                            df_cev, cev_target_columns, fleet_id, timestamp, out_dir,
+                            threshold_multiplier, min_abs_deviation, min_deviation,
+                            trend_window, history_window, enable_visualization, spike_period,
+                            stable_regime_points, stable_regime_tolerance_ratio, stable_shift_min_ratio,
+                            expected_relative_tolerance, threshold_width_cap_ratio,
+                            lower_anomaly_tolerance_multiplier, normal_dispersion_multiplier,
+                            normal_dispersion_floor_ratio, normal_dispersion_min_points
+                        )
+                        mode_results.append(('cev_results', res_df, csv_path, plot_path))
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    print(f"⚠️ 获取 cev_results 数据失败: {e}")
 
             if not mode_results:
                 return f"⚠️ 无法检测：指定时间段内没有获取到有效数据。"

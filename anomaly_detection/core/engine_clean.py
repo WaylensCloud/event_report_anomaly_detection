@@ -536,34 +536,34 @@ class AnomalyDetectorEngine:
         max_scores = tot_score.copy()
 
         sub_results = {}
-        for col in target_cols:
-            if df[col].max() < 1:
-                continue
-            sub_anom, sub_score, sub_exp, _, sub_ub = AnomalyDetectorEngine._run_periodic_phase_anomaly(
-                df[col], threshold_multiplier, min_deviation, spike_period,
-                stable_regime_points=stable_regime_points,
-                stable_regime_tolerance_ratio=stable_regime_tolerance_ratio,
-                stable_shift_min_ratio=stable_shift_min_ratio,
-                expected_relative_tolerance=expected_relative_tolerance,
-                threshold_width_cap_ratio=threshold_width_cap_ratio,
-                lower_anomaly_tolerance_multiplier=lower_anomaly_tolerance_multiplier,
-                normal_dispersion_multiplier=normal_dispersion_multiplier,
-                normal_dispersion_floor_ratio=normal_dispersion_floor_ratio,
-                normal_dispersion_min_points=normal_dispersion_min_points
-            )
-            sub_results[col] = (sub_anom, sub_score, sub_exp)
+        # for col in target_cols:
+        #     if df[col].max() < 1:
+        #         continue
+        #     sub_anom, sub_score, sub_exp, _, sub_ub = AnomalyDetectorEngine._run_periodic_phase_anomaly(
+        #         df[col], threshold_multiplier, min_deviation, spike_period,
+        #         stable_regime_points=stable_regime_points,
+        #         stable_regime_tolerance_ratio=stable_regime_tolerance_ratio,
+        #         stable_shift_min_ratio=stable_shift_min_ratio,
+        #         expected_relative_tolerance=expected_relative_tolerance,
+        #         threshold_width_cap_ratio=threshold_width_cap_ratio,
+        #         lower_anomaly_tolerance_multiplier=lower_anomaly_tolerance_multiplier,
+        #         normal_dispersion_multiplier=normal_dispersion_multiplier,
+        #         normal_dispersion_floor_ratio=normal_dispersion_floor_ratio,
+        #         normal_dispersion_min_points=normal_dispersion_min_points
+        #     )
+        #     sub_results[col] = (sub_anom, sub_score, sub_exp)
 
-            # 如果该单项在整个扫描周期内发生过异常，将其完整信息保存到 df 中供独立作图
-            if sub_anom.any():
-                df[f'sub_exp_{col}'] = sub_exp
-                df[f'sub_lb_{col}'] = sub_exp.attrs.get('lower_bound', pd.Series(0.0, index=df.index))
-                df[f'sub_ub_{col}'] = sub_ub
-                df[f'sub_anom_{col}'] = sub_anom
-                df[f'sub_score_{col}'] = sub_score
-                df[f'sub_ml_train_inliers_{col}'] = sub_exp.attrs.get('trained_inlier_counts', [0] * len(df))
-                df[f'sub_cleaned_for_model_{col}'] = sub_exp.attrs.get('cleaned_series', df[col])
-                df[f'sub_regime_shift_active_{col}'] = sub_exp.attrs.get('regime_shift_flags', [False] * len(df))
-                df[f'sub_regime_level_{col}'] = sub_exp.attrs.get('regime_levels', [np.nan] * len(df))
+        #     # 如果该单项在整个扫描周期内发生过异常，将其完整信息保存到 df 中供独立作图
+        #     if sub_anom.any():
+        #         df[f'sub_exp_{col}'] = sub_exp
+        #         df[f'sub_lb_{col}'] = sub_exp.attrs.get('lower_bound', pd.Series(0.0, index=df.index))
+        #         df[f'sub_ub_{col}'] = sub_ub
+        #         df[f'sub_anom_{col}'] = sub_anom
+        #         df[f'sub_score_{col}'] = sub_score
+        #         df[f'sub_ml_train_inliers_{col}'] = sub_exp.attrs.get('trained_inlier_counts', [0] * len(df))
+        #         df[f'sub_cleaned_for_model_{col}'] = sub_exp.attrs.get('cleaned_series', df[col])
+        #         df[f'sub_regime_shift_active_{col}'] = sub_exp.attrs.get('regime_shift_flags', [False] * len(df))
+        #         df[f'sub_regime_level_{col}'] = sub_exp.attrs.get('regime_levels', [np.nan] * len(df))
 
         # 3. 汇总报警理由
         for i in range(len(df)):
@@ -1072,5 +1072,269 @@ class AnomalyDetectorEngine:
         )
 
         fig.suptitle(f'Events Per Hour Anomaly Analysis - Fleet: {fleet_id}', fontsize=18, fontweight='bold', y=1.0)
+        plt.savefig(save_path, dpi=120, bbox_inches='tight')
+        plt.close(fig)
+
+    # ------------------- 模式 4: cev_results 比例异常检测 -------------------
+    @staticmethod
+    def run_cev_results_spike(
+        df: pd.DataFrame,
+        target_cols: List[str],
+        threshold_multiplier: float,
+        min_deviation: float,
+        trend_window: int,
+        history_window: int,
+        spike_period: int = 7,
+        stable_regime_points: int = 3,
+        stable_regime_tolerance_ratio: float = 0.10,
+        stable_shift_min_ratio: float = 0.45,
+        expected_relative_tolerance: float = 0.65,
+        threshold_width_cap_ratio: float = 1.80,
+        lower_anomaly_tolerance_multiplier: float = 1.80,
+        normal_dispersion_multiplier: float = 3.0,
+        normal_dispersion_floor_ratio: float = 0.25,
+        normal_dispersion_min_points: int = 4
+    ) -> pd.DataFrame:
+        """
+        专门检测 cev_results 比例指标的异常，使用与 volume_spike 相同的方法
+
+        Args:
+            df: 数据框（包含各事件类型的 cev_ratio 列）
+            target_cols: 目标事件类型列
+            threshold_multiplier: 阈值乘数
+            min_deviation: 最小偏差
+            trend_window: 趋势窗口
+            history_window: 历史窗口
+            spike_period: 周期长度
+            stable_regime_points: 稳定区间点数
+            stable_regime_tolerance_ratio: 稳定区间容差
+            stable_shift_min_ratio: 稳定切换最小比例
+            expected_relative_tolerance: 预测值附近的最小相对容忍区间
+            threshold_width_cap_ratio: 阈值区间最大可扩到 expected 的比例
+            lower_anomaly_tolerance_multiplier: 低于预测值时额外放宽倍数
+            normal_dispersion_multiplier: 历史正常离散度放大倍数
+            normal_dispersion_floor_ratio: 历史离散度阈值相对下限
+            normal_dispersion_min_points: 启用历史离散度判断的最少已确认点数
+
+        Returns:
+            检测结果数据框
+        """
+        df = df.copy()
+        df['spike_period'] = max(int(spike_period), 1)
+
+        # 扫描所有独立事件类型的 cev_ratio
+        any_anom = np.zeros(len(df), dtype=bool)
+        anom_reasons = [''] * len(df)
+        max_scores = pd.Series([0.0] * len(df), index=df.index)
+
+        sub_results = {}
+        print(f"[DEBUG] run_cev_results_spike: 开始处理 {len(target_cols)} 个目标事件类型: {target_cols}")
+        for col in target_cols:
+            # print(f"[DEBUG] 处理事件类型: {col}")
+            if df[col].max() < 0.001: 
+                continue
+            # 跳过比例小的事件类型，保留所有事件类型
+            sub_anom, sub_score, sub_exp, _, sub_ub = AnomalyDetectorEngine._run_periodic_phase_anomaly(
+                df[col], threshold_multiplier, min_deviation, spike_period,
+                stable_regime_points=stable_regime_points,
+                stable_regime_tolerance_ratio=stable_regime_tolerance_ratio,
+                stable_shift_min_ratio=stable_shift_min_ratio,
+                expected_relative_tolerance=expected_relative_tolerance,
+                threshold_width_cap_ratio=threshold_width_cap_ratio,
+                lower_anomaly_tolerance_multiplier=lower_anomaly_tolerance_multiplier,
+                normal_dispersion_multiplier=normal_dispersion_multiplier,
+                normal_dispersion_floor_ratio=normal_dispersion_floor_ratio,
+                normal_dispersion_min_points=normal_dispersion_min_points
+            )
+            sub_results[col] = (sub_anom, sub_score, sub_exp, sub_ub)
+
+            # 保存所有事件类型的完整信息到 df 中供独立作图（不只是有异常的）
+            df[f'sub_exp_{col}'] = sub_exp
+            df[f'sub_lb_{col}'] = sub_exp.attrs.get('lower_bound', pd.Series(0.0, index=df.index))
+            df[f'sub_ub_{col}'] = sub_ub
+            df[f'sub_anom_{col}'] = sub_anom
+            df[f'sub_score_{col}'] = sub_score
+            df[f'sub_ml_train_inliers_{col}'] = sub_exp.attrs.get('trained_inlier_counts', [0] * len(df))
+            df[f'sub_cleaned_for_model_{col}'] = sub_exp.attrs.get('cleaned_series', df[col])
+            df[f'sub_regime_shift_active_{col}'] = sub_exp.attrs.get('regime_shift_flags', [False] * len(df))
+            df[f'sub_regime_level_{col}'] = sub_exp.attrs.get('regime_levels', [np.nan] * len(df))
+
+        # 汇总报警理由
+        for i in range(len(df)):
+            reasons = []
+            for col, (sub_anom, sub_score, sub_exp, _) in sub_results.items():
+                if sub_anom.iloc[i]:
+                    actual_val = df[col].iloc[i]
+                    reasons.append(f"【{col} CEV比例异常】实际 {actual_val:.2%} (预期仅 {sub_exp.iloc[i]:.2%})")
+                    any_anom[i] = True
+                    if sub_score.iloc[i] > max_scores.iloc[i]:
+                        max_scores.iloc[i] = sub_score.iloc[i]
+
+            if reasons:
+                anom_reasons[i] = "；".join(reasons)
+
+        df['is_anomaly'] = pd.Series(any_anom, index=df.index)
+        df['anomaly_reason'] = anom_reasons
+        df['anomaly_score'] = max_scores
+        df['target_columns'] = ','.join(target_cols)
+        return df
+
+    @staticmethod
+    def plot_cev_results_spike(df: pd.DataFrame, fleet_id: str, save_path: str, spike_period: int = 7):
+        """
+        生成 cev_results 异常检测的可视化图表，画出所有事件类型
+        """
+        dates = df['event_date']
+        if 'spike_period' in df.columns and len(df) > 0:
+            spike_period = int(df['spike_period'].iloc[0])
+        spike_period = max(int(spike_period), 1)
+
+        # 获取所有需要画的事件类型：从 target_columns 中获取所有列
+        target_col_str = df.get('target_columns', [''])
+        if isinstance(target_col_str, pd.Series) and len(target_col_str) > 0:
+            all_items = str(target_col_str.iloc[0]).split(',') if target_col_str.iloc[0] else []
+        else:
+            all_items = []
+
+        # 如果从 target_columns 获取不到，那就找所有数值列（排除元数据列）
+        if not all_items:
+            all_items = [c for c in df.columns if c not in ['fleetid', 'event_date', 'spike_period', 'target_columns']
+                        and pd.api.types.is_numeric_dtype(df[c])]
+
+        # 进一步筛选：只保留有数据的列
+        all_items = [c for c in all_items if c in df.columns and df[c].sum() > 0]
+        print(f"[DEBUG] plot_cev_results_spike: 一共找到了 {len(all_items)} 个事件类型要画: {all_items}")
+
+        def plot_period_split(fig, subplot_spec, value_col, exp_col, anom_col, title, ylabel):
+            sub_gs = GridSpecFromSubplotSpec(
+                spike_period, 1, subplot_spec=subplot_spec, hspace=0.16
+            )
+            cmap = plt.get_cmap('tab10' if spike_period <= 10 else 'tab20')
+            first_ax = None
+            last_ax = None
+            axes = []
+            for phase in range(spike_period):
+                phase_positions = [i for i in range(len(df)) if i % spike_period == phase]
+                ax = fig.add_subplot(sub_gs[phase, 0], sharex=first_ax)
+                axes.append(ax)
+                if first_ax is None:
+                    first_ax = ax
+                last_ax = ax
+
+                if not phase_positions:
+                    ax.text(0.01, 0.78, f'Phase {phase + 1}: no data', transform=ax.transAxes, fontsize=9)
+                    ax.grid(True, alpha=0.25)
+                    continue
+
+                phase_df = df.iloc[phase_positions]
+                color = cmap(phase % cmap.N)
+                ax.plot(
+                    phase_df['event_date'], phase_df[value_col], marker='.', linewidth=1.2,
+                    alpha=0.80, color=color, label=f'Phase {phase + 1} Actual'
+                )
+                ax.plot(
+                    phase_df['event_date'], phase_df[exp_col], linestyle='--', linewidth=1.2,
+                    alpha=0.95, color=color, label=f'Phase {phase + 1} Expected'
+                )
+
+                if anom_col in phase_df.columns:
+                    anomalies = phase_df[phase_df[anom_col]]
+                    if not anomalies.empty:
+                        ax.scatter(
+                            anomalies['event_date'], anomalies[value_col],
+                            color='red', s=46, marker='^', zorder=10
+                        )
+
+                ax.text(
+                    0.01, 0.78, f'Phase {phase + 1}',
+                    transform=ax.transAxes, fontsize=9, fontweight='bold',
+                    color=color, bbox=dict(facecolor='white', alpha=0.65, edgecolor='none', pad=1.5)
+                )
+                ax.set_ylabel(ylabel, fontsize=8)
+                ax.grid(True, alpha=0.25)
+                if phase == 0:
+                    ax.legend(loc='upper right', fontsize=8, ncol=2)
+
+            if first_ax is not None:
+                first_ax.set_title(title, fontsize=13, fontweight='bold', color='darkslategray')
+            for ax in axes[:-1]:
+                ax.tick_params(labelbottom=False)
+            if last_ax is not None:
+                last_ax.set_xlabel('Event Date', fontsize=10)
+
+        phase_section_height = max(3.6, spike_period * 0.9)
+        # 为所有事件项分配空间
+        section_heights = []
+        for _ in all_items:
+            section_heights.extend([1.4, phase_section_height])
+
+        if not section_heights:
+            section_heights = [1.4, phase_section_height]
+
+        fig_height = max(10, 4.0 * sum(section_heights))
+        fig = plt.figure(figsize=(16, fig_height), constrained_layout=True)
+        gs = plt.GridSpec(len(section_heights), 1, height_ratios=section_heights)
+
+        # 为所有事件项创建子图
+        plot_idx = 0
+        for col in all_items:
+            if plot_idx + 1 >= len(section_heights):
+                break
+
+            exp_col = f'sub_exp_{col}'
+            ub_col = f'sub_ub_{col}'
+            lb_col = f'sub_lb_{col}'
+            anom_col = f'sub_anom_{col}'
+
+            # 如果列不存在，跳过
+            if exp_col not in df.columns or ub_col not in df.columns:
+                continue
+
+            # 主趋势图
+            ax_sub = fig.add_subplot(gs[plot_idx])
+            safe_lower = df[lb_col] if lb_col in df.columns else (df[exp_col] - (df[ub_col] - df[exp_col])).clip(lower=0)
+            ax_sub.fill_between(dates, safe_lower, df[ub_col], color='green', alpha=0.15, label=f'Safe Range ({col})')
+            ax_sub.plot(dates, df[exp_col], color='green', linestyle='--', linewidth=2, label='Expected Trend Baseline')
+            ax_sub.plot(dates, df[col], color='royalblue', linewidth=1.5, marker='.', alpha=0.8, label=f'Actual {col} CEV Ratio')
+
+            # 设置y轴为百分比格式
+            ax_sub.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.0%}'))
+
+            anomalies = df[df[anom_col]] if anom_col in df.columns else pd.DataFrame()
+            if not anomalies.empty:
+                ax_sub.scatter(anomalies['event_date'], anomalies[col],
+                           color='red', s=120, marker='X', zorder=10, label=f'{col} Anomaly')
+                top_anoms = anomalies.sort_values(f'sub_score_{col}', ascending=False).head(5) if f'sub_score_{col}' in df.columns else anomalies.head(5)
+                for _, row in top_anoms.iterrows():
+                    ax_sub.annotate(f"{row['event_date'].strftime('%m-%d')}\n({row[col]:.1%})",
+                                (row['event_date'], row[col]), xytext=(5, 5), textcoords='offset points',
+                                color='darkred', fontsize=9, fontweight='bold')
+
+            ax_sub.set_title(f'{plot_idx//2 + 1}. {col} CEV Ratio Trend - Fleet: {fleet_id}', fontsize=15, fontweight='bold', color='black')
+            ax_sub.set_ylabel('CEV True Ratio', fontsize=12)
+            ax_sub.grid(True, alpha=0.3)
+            ax_sub.legend(loc='upper right', fontsize=11)
+
+            # 周期拆分图
+            plot_period_split(
+                fig,
+                gs[plot_idx + 1],
+                col,
+                exp_col,
+                anom_col,
+                f'{plot_idx//2 + 1}. Period-Split {col} CEV Ratio (period={spike_period})',
+                'CEV True Ratio'
+            )
+
+            plot_idx += 2
+
+        if plot_idx == 0:
+            # 如果没有画出任何图，至少展示一个信息
+            ax = fig.add_subplot(gs[0])
+            ax.text(0.5, 0.5, 'No CEV Results data to plot or no anomalies detected',
+                   ha='center', va='center', fontsize=14)
+            ax.axis('off')
+
+        fig.suptitle(f'CEV Results Anomaly Analysis - Fleet: {fleet_id}', fontsize=18, fontweight='bold', y=1.0)
         plt.savefig(save_path, dpi=120, bbox_inches='tight')
         plt.close(fig)

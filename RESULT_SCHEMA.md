@@ -113,6 +113,7 @@
 | `volume_spike` | `string` | 事件总量或单项事件数量相对历史趋势异常升高或降低。 |
 | `distribution_shift` | `string` | 事件类型占比结构相对历史分布发生异常漂移。 |
 | `events_per_hour` | `string` | 每小时事件数指标相对历史趋势异常。 |
+| `cev_results` | `string` | 某事件类型在云端识别模型中识别为 true 的比例相对历史趋势异常。 |
 
 工具内部可能支持 `all` 作为调用参数，但多模式结果中建议保留每个实际执行模式的原始结果，而不是把 `all` 作为分析模式。
 
@@ -123,6 +124,7 @@
 | `event_count` | `string` | 事件数量。常见于 `volume_spike`。 |
 | `event_proportion` | `string` | 某事件类型占总事件量的比例。常见于 `distribution_shift`。 |
 | `events_per_hour` | `string` | 每小时事件数。常见于 `events_per_hour`。 |
+| `cev_ratio` | `string` | 某事件类型在云端识别模型中识别为 true 的比例（0-1之间的小数）。常见于 `cev_results`。 |
 
 如果后续新增检测模式，`metric` 可能出现新的字符串。AI 应优先根据 `detection_mode`、`reason` 和 `extra` 理解其含义。
 
